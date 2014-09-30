@@ -1,0 +1,422 @@
+    1. Basic time-based task: blinking an LED
+    2. Expanding on Fixed Time-based LED Blinking -- Variable Timing
+    3. Adding User Input to Control Variable Timing
+    4. Blinking without delay()
+    5. Blinking and Responsive User Inputs
+    6. More: Blinking, User Input, and Serial...
+
+One of the concepts many people find challenging when learning and beginning to writing code for microcontroller applications is: how to manage multiple hardware-related tasks, seemingly all running at the same time. Notably, events that should trigger some corresponding (re)action can occur at any time and in any order. It would be wonderful to write separate bits of code for each event type and (re) action, and then have the microcontroller run them as multiple separate threads of execution. Unfortunately, microcontrollers (such as the Arduino's ATmega328P chip) are really micro and don't have the hardware resources (such as our laptop computers) to execute a real operating system that support multiple processes and simultaneous threads of execution.
+
+This tutorial will explain the danger associated with using "delay()" in code for time-based actions, and take you incrementally through a few code examples to introduce a very simple framework for managing multiple asynchronous tasks/services. While the framework is pretty informal, it should give you good preparation for coding your pBot designs. If you are interested, there are more structured and sophisticated ways to deal with multiple tasks. Feel free to ask the TTeam or explore on your own.
+
+Let's start by reviewing the code for the blinking LED -- the program that is initialized on your RBBB that you've built. This very simple program demonstrates the basic concepts of time-based events and actions. Just about everything we do in the microcontroller world has some elements of timing involved. Then, we'll explain one of the major potential gotchas in this program, how to avoid such pitfalls, and how to better manage time-based activities.
+1.  Basic time-based task: blinking an LED
+
+Let's dive in and look at the code for the Blink LED sketch provided as example in the Arduino software package you downloaded:
+code-example-1:
+
+    /*
+      Blink
+      Turns on an LED on for one second, then off for one second, repeatedly.
+     
+      This example code is in the public domain.
+     */
+     
+    // Pin 13 has an LED connected on most Arduino boards.
+    // give it a name:
+    int led = 13;
+     
+    // the setup routine runs once when you press reset:
+    void setup() {                
+      // initialize the digital pin as an output.
+      pinMode(led, OUTPUT);    
+    }
+     
+    // the loop routine runs over and over again forever:
+    void loop() {
+      digitalWrite(led, HIGH);   // turn the LED on (HIGH is the voltage level)
+      delay(1000);               // wait for a second
+      digitalWrite(led, LOW);    // turn the LED off by making the voltage LOW
+      delay(1000);               // wait for a second
+    }
+
+[$[Get Code]]
+
+Step through and understand the execution of this code. Note how the above uses delay(1000) in loop() to define the timing for repeated blinks of the LED with 1 sec ON followed by 1 sec OFF, yielding a nice 50% duty cycle.
+
+Here is another way of writing loop() to toggle the LED (HIGH->LOW and then HIGH->LOW) so that every time through loop(), alternating -- LED turns on, LED turns off. Each pass through the loop takes approximately 1000 ms; nearly 100% of this time is spent inside delay(1000) :
+
+    int ledState = LOW;
+    void loop() {
+      if (ledState == HIGH)
+        ledState = LOW;            // HIGH -> LOW
+      else
+        ledState = HIGH;           // LOW -> HIGH
+      digitalWrite(led,ledState);  // make LED ON/OFF same as updated ledState
+     
+      delay(1000);                 // wait for a sec
+    }
+
+Make sure you understand how this alternative for loop() is functionally equivalent before going further. We'll be using this alternate way for toggling the LED in the subsequent code examples below.
+2.  Expanding on Fixed Time-based LED Blinking -- Variable Timing
+
+Now, what if we wanted to be able to easily change the LED blink timing? What if we wanted to be able to easily change the rate by modifying only one line in our code, and instead of blinking once every 2 second, blink once per second, twice per second, or 4 times per sec sec? Instead of the hard coded timing value of 1000, we could use a variable to define the LED's blink timing as in the following example:
+code-example-2:
+VBlink.ino
+// Pin 13 has an LED connected on most Arduino boards.
+// give it a name:
+int led = 13;
+
+int ledState = LOW;
+
+int tperiod[4] = {1000, 500, 250, 125};  // blink rates: 1/2sec,1/sec,2/sec,4/sec
+int tselect;
+
+// the setup routine runs once when you press reset:
+void setup() {                
+  // initialize the digital pin as an output.
+  pinMode(led, OUTPUT);    
+  tselect = 1;      // select blink rate = 1 (1 per sec)
+}
+
+// the loop routine runs over and over again forever:
+void loop() {
+  if (ledState == HIGH)
+    ledState = LOW;            // HIGH -> LOW
+  else
+    ledState = HIGH;           // LOW -> HIGH
+  digitalWrite(led,ledState);  // make LED ON/OFF same as updated ledState
+
+  delay(tperiod[tselect]);     // wait here for specified time
+}
+[$[Get Code]]
+
+We've defined an array of timing values. Then in the setup() function, we can specify {0,1,2, or 3} for tselect to specify which of the defined in array blink rates we want.
+3.  Adding User Input to Control Variable Timing
+
+Like the initial Blink program, if this was all that the arduino would be doing is control the LED's blinking ON and OFF, this works pretty well. For the pBot, we might like to do more things than just constant blinking lights.
+
+What if we wanted the arduino to do a little bit more? Some user inputs might be desirable. For example, we want the arduino to observe user input from two push button switches that when hit, would dynamically and correspondingly increase or decrease the blink frequency. One way to do this would be to insert some read input function calls into code-example-2, like this:
+code-example-3:
+UserVBlink.ino
+// Pin 13 has an LED connected on most Arduino boards.
+// give it a name:
+int led = 13;
+
+int keyF = 11;  // user button switch ==> faster
+int keyS = 12;  // user button switch ==> slower
+
+#define MAX_SELECT 4
+int tperiod[MAX_SELECT] = {1000, 500, 250, 125};  // blink rates: 1/2sec,1/sec,2/sec,4/sec
+int tselect;
+
+// the setup routine runs once when you press reset:
+void setup() {                
+  // initialize the digital pin as an output.
+  pinMode(led, OUTPUT);    
+  pinMode(keyF, INPUT);
+  pinMode(keyS, INPUT);
+  tselect = 1;      // select blink rate = 1 per sec
+}
+
+// the loop routine runs over and over again forever:
+void loop() {
+  if (ledState == HIGH)
+    ledState = LOW;            // HIGH -> LOW
+  else
+    ledState = HIGH;           // LOW -> HIGH
+  digitalWrite(led,ledState);  // make LED ON/OFF same as updated ledState
+
+  delay(1000);                 // wait for a sec
+
+  if (readUserKeyF()) tselect = blinkFaster();
+  if (readUserKeyS()) tselect = blinkSlower();
+}
+
+int blinkFaster(void) {
+  if (tselect < MAX_SELECT-1)
+    return (tselect+1);
+  else
+    return tselect;
+}
+int blinkSlower(void) {
+  if (tselect > 0)
+    return (tselect - 1);
+  else
+    return tselect;
+}
+
+int readUserKeyF(void) {
+  if (digitalRead(keyF) == LOW) return 1;
+  else return 0;
+}
+int readUserKeyS(void) {
+  if (digitalRead(keyS) == LOW) return 1;
+  else return 0;
+}
+[$[Get Code]]
+
+However, note that while the arduino microcontroller is executing the delay(t_millisec) function to control the blink timing, code execution effectively stops until the delay is complete. During this time, the microcontroller is unable to do anything else; task execution is blocked. So, if a user hits the switch at the same time while executing any of these delay() function calls, these user inputs would be easily ignored. The longer the delays, the more likely it is to miss the user's key-hits. Have you encountered devices where occasionally pushing a button doesn't respond by doing what the button was to perform. The user would think the device is flaky (not good user experience). What can be done with our code to help improve this?
+
+The hardware wiring for this and subsequent examples would look like this:
+	
+4.  Blinking without delay()
+
+There is an alternative way to control the LED ON/OFF blink timing without using delay(). The arduino has an internal timer that counts upward; counter starts at zero on reset, and with every passing millisec it increments by one. We can access this counter value by calling function millis() and use the return value to calculate when we should turn on or off our blinking LED. We check, and if we have reached or passed the calculated (trigger) timer value, then we perform the LED toggle. Here is what our LED blink program (from code-example-1) might look like using this approach.
+code-example-4:
+Blink+.ino
+// Pin 13 has an LED connected on most Arduino boards.
+// give it a name:
+int led = 13;
+long tnow, tnext = 0;
+int ledState = LOW;
+
+// the setup routine runs once when you press reset:
+void setup() {                
+  // initialize the digital pin as an output.
+  pinMode(led, OUTPUT);    
+}
+
+// the loop routine runs over and over again forever:
+void loop() {
+
+  tnow = millis();           // get current millisec counter value
+
+  if (tnow >= tnext) {       // is it time to change the ledState?
+    // YES: time to change, reverse ledState: HIGH->LOW, LOW->HIGH
+
+    if (ledState == HIGH)
+      ledState = LOW;            // HIGH -> LOW
+    else
+      ledState = HIGH;           // LOW -> HIGH
+    digitalWrite(led,ledState);  // make LED ON/OFF same as updated ledState
+
+    tnext = tnow + 1000;    // set time of next ledState change
+  }
+
+  // beyond updating LED in this loop(),
+  // we can now do many other things here
+  // between time now and when "tnext" occurs
+
+}
+[$[Get Code]]
+5.  Blinking and Responsive User Inputs
+
+Using this approach to eliminate delay() from our program, the microcontroller has opportunity to do much much more in-between and before the next LED ON/OFF toggle on every pass through loop(). To take advantage of this, we can insert code to have the microcontroller also check whether the user input switches have been hit and process that input when needed. Because the loops are running so very quickly now (without delays), these checks happens frequently, and few (if any) button presses will be missed. In fact, we are likely to have the opposite problem (see note at bottom of this section).
+
+A state transition diagram showing how these user input handlers can be easily added to the program structure, in relation to the simple LED blink example, is presented below:
+
+And here is what the corresponding code might look like:
+code-example-5:
+UserVBlink+.ino
+// Pin 13 has an LED connected on most Arduino boards.
+// give it a name:
+int led = 13;
+
+int keyF = 11;  // user button switch ==> faster
+int keyS = 12;  // user button switch ==> slower
+
+#define MAX_SELECT 4
+int tperiod[MAX_SELECT] = {1000, 500, 250, 125};  // blink rates: 1/2sec,1/sec,2/sec,4/sec
+int tselect;
+
+long tnow, tnext = 0;
+int ledState = LOW;
+
+// the setup routine runs once when you press reset:
+void setup() {                
+  // initialize the digital pin as an output.
+  pinMode(led, OUTPUT);    
+  pinMode(keyF, INPUT);
+  pinMode(keyS, INPUT);
+  tselect = 1;      // select blink rate = 1 per sec
+}
+
+// the loop routine runs over and over again forever:
+void loop() {
+
+  tnow = millis();           // get current millisec counter value
+
+  if (tnow >= tnext) {       // is it time to change the ledState?
+    // YES: time to change, toggle ledState: HIGH->LOW, LOW->HIGH
+    toggleLED();
+    tnext = tnow + tperiod[tselect];    // set time of next ledState change
+  }
+
+  if (readUserKeyF()) tselect = blinkFaster();
+  if (readUserKeyS()) tselect = blinkSlower();
+
+  // beyond updating LED and checking on pushbuttons in this loop(),
+  // we can now do even more things here
+  // between time now and when "tnext" occurs
+
+}
+
+void toggleLED(void) {
+    if (ledState == HIGH)
+      ledState = LOW;
+    else
+      ledState = HIGH;
+    digitalWrite(led,ledState);  // make LED ON/OFF same as updated ledState
+}
+
+int blinkFaster(void) {
+  if (tselect < MAX_SELECT-1)
+    return (tselect+1);
+  else
+    return tselect;
+}
+int blinkSlower(void) {
+  if (tselect > 0)
+    return (tselect - 1);
+  else
+    return tselect;
+}
+
+int readUserKeyF(void) {
+  if (digitalRead(keyF) == LOW) return 1;
+  else return 0;
+}
+int readUserKeyS(void) {
+  if (digitalRead(keyS) == LOW) return 1;
+  else return 0;
+}
+[$[Get Code]]
+
+If we step back a bit, we see that the above code is effectively running two (seemingly) "simultaneous" tasks:
+
+    blink the LED at varying speeds, and
+    process user inputs that specify the speed. 
+
+This is pretty neat and in fact, we can expand on this to include more than just two tasks using this basic construction. We can cooperatively schedule multiple tasks dynamically.
+
+NOTE: Having eliminated delay() calls from our program, our loop() now runs so efficiently that phenomena such as switch bounce are easily observable. Moreover, the loop execution repeats so fast and is thus so responsive to user input that one cannot release the button quickly enough before completing multiple iterations through the loop. Thus, with the code above as written, it's hard to not have a single button press be read as multiple button presses. Here, left as exercise for the reader: improve the program to debounce button presses (switch closures) in software.
+
+hint: very quick fluctuations of input from keyS or keyF, such as a sequence of HIGH->LOW->HIGH->LOW... that occur within less than a 5 millisec period, are likely the result of switch contact bounce. Additionally, we can conclude that a user has (intentionally) released a button switch after observing a stable HIGH on the input for more than 50 millisec.
+6.  More: Blinking, User Input, and Serial...
+
+Now, let's try a slightly more complex example where we add two serial communication tasks to our previous two tasks, for a total of four simultaneously running service tasks:
+
+    blink the LED at varying speeds, and
+    process user button presses that increase/decrease LED blink speed.
+    read a single char command from the arduino's serial port,
+    write a blink speed status message to the serial port every 3 seconds, and thus also indicate that the pBot's arduino is connected and running. 
+
+A great way to envision how to architect the (pseudo) code for this example is a state transition diagram, as shown below:
+
+And this is how the code for this slightly more complex example might look like.
+code-example-6:
+UserVBlink+Serial2.ino
+
+    // Pin 13 has an LED connected on most Arduino boards.
+    // give it a name:
+    int led = 13;
+     
+    int keyF = 11;  // user button switch ==> faster
+    int keyS = 12;  // user button switch ==> slower
+     
+    #define MAX_SELECT 4
+    int tperiod[MAX_SELECT] = {1000, 500, 250, 125};  // blink rates: 1/2sec,1/sec,2/sec,4/sec
+    int tselect;
+     
+    long tnow, tnextLED = 0, tnextSpeedReport = 0;
+    int ledState = LOW;
+     
+    // the setup routine runs once when you press reset:
+    void setup() {                
+      Serial.begin(9600);
+      // initialize the digital pin as an output.
+      pinMode(led, OUTPUT);    
+      pinMode(keyF, INPUT);
+      pinMode(keyS, INPUT);
+      tselect = 1;      // select blink rate = 1 per sec
+    }
+     
+    // the loop routine runs over and over again forever:
+    void loop() {
+     
+      tnow = millis();          // get current millisec counter value
+     
+      // MONITOR TIME FOR LED BLINKING
+      if (tnow >= tnextLED)           // is it time to toggle LED?
+        toggleLED_tnext(tnow);        // do it and update tnextLED
+     
+     
+      // MONITOR USER PUSHBUTTONS
+      if (readUserKeyF())         // is user pushing faster button?
+        blinkFaster();            // increase blink rate
+      if (readUserKeyS())         // is user pushing slower button?
+        blinkSlower();            // decrease blink rate
+     
+      // MONITOR SERIAL PORT FOR COMMAND INPUTS
+      if (Serial.available())        // received user typed speed command?
+        doSpeedCmd();                  // read speed cmd, set new selection
+     
+      // MONITOR TIME FOR REPORTING BLINKING RATE
+      if (tnow >= tnextSpeedReport)  // is it time to report speed
+        reportSpeed(tnow);           // do it and update tnextSpeedReport
+     
+      // we now have setup a small series of services that we are
+      // repeatedly monitoring and dispatching as needed in this loop
+     
+    }
+     
+    void toggleLED_tnext(long tnow) {
+        if (ledState == HIGH)
+          ledState = LOW;
+        else
+          ledState = HIGH;
+        digitalWrite(led,ledState);    // turn LED ON/OFF together w/ ledState
+     
+        tnextLED = tnow + tperiod[tselect];    // set time of next ledState chg
+    }
+     
+    void blinkFaster(void) {
+      if (tselect < MAX_SELECT-1)
+        tselect = (tselect+1);
+    }
+    void blinkSlower(void) {
+      if (tselect > 0)
+        tselect = (tselect - 1);
+    }
+     
+    int readUserKeyF(void) {
+      if (digitalRead(keyF) == LOW) return 1;
+      else return 0;
+    }
+    int readUserKeyS(void) {
+      if (digitalRead(keyS) == LOW) return 1;
+      else return 0;
+    }
+     
+    int doSpeedCmd(void) {
+      char c = Serial.read();       // get new serial char cmd
+      if (c >= '0' && c <= '3') {   // check if it's a valid cmd value ('0'..'3')
+                                    // convert char to integer value (0..3)
+        tselect = (c - '0');      // and update tselect
+      }
+      // otherwise, ignore cmd if it is not valid
+    }
+     
+    void reportSpeed(long tnow) {
+      Serial.print("tperiod[");
+      Serial.print(tselect);
+      Serial.print("] = ");
+      Serial.println(tperiod[tselect]);
+     
+      tnextSpeedReport = tnow + 3000;    // set time of next SpeedReport
+    }
+
+[$[Get Code]]
+
+Notice the simple repetition of a patterned structure within the loop() function. When a trigger event or stimulus state is observed, its corresponding action or reaction is performed.
+
+    if (trigger1Occurs)  executeTrigger1Action();
+    if (trigger2Occurs)  executeTrigger2Action();
+     .
+     .
+     .
+
+In our example above, this pattern is repeated for: LED blink, pushButtons KeyF and KeyS, serial command input, and status report output.
+
+In review, this very simple and efficient structure for managing multiple tasks within loop() has been made possible by eliminating time blocked execution of tasks (such as with delay() function calls) from our program. ;-) 
